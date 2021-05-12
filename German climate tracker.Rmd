@@ -90,7 +90,24 @@ Liste <-
     "Augsburg",
     "Neuhaus am Rennweg",
     "Heinersreuth-Vollhof",
-    "Helgoland"
+    "Helgoland",
+    "Ahaus",
+    "Aldersbach-Kriestorf",
+    "Alsfeld-Eifa",
+    "Altenstadt",
+    "Angermuende",
+    "Anklam",
+    "Siegsdorf-Hoell",
+    "Singen",
+    "Sohland/Spree",
+    "Sontra",
+    "Staffelstein, Bad-Stublang",
+    "Starkenberg-Tegkwitz",
+    "Steinau, Kr. Cuxhaven",
+    "Straubing",
+    "Tholey",
+    "Tirschenreuth-Lodermuehl",
+    "Trier-Petrisberg"
   )%>%
   sort()
 ```

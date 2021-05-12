@@ -1,0 +1,11 @@
+name: german_climate_tracker
+title:
+username:
+account: tobias-kellner
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 4119589
+bundleId: 4589332
+url: https://tobias-kellner.shinyapps.io/german_climate_tracker/
+when: 1620811176.65967
+lastSyncTime: 1620811176.65967
