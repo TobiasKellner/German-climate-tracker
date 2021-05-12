@@ -1,0 +1,884 @@
+---
+title: "German climate tracker"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    social: menu
+    source_code: embed
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(lubridate)
+library(tidyverse)
+library(rdwd)
+library(plotly)
+library(shiny)
+library(leaflet)
+library(htmltools)
+library(readr)
+
+Sys.setlocale(locale = "English")
+```
+
+# Averages and trends
+
+```{r}
+Liste <-
+  c(
+    "Berlin-Tempelhof",
+    "Erfurt-Weimar",
+    "Jena (Sternwarte)",
+    "Frankfurt/Main",
+    "Stuttgart-Echterdingen",
+    "Hannover",
+    "Hamburg-Neuwiedenthal",
+    "Koeln-Bonn",
+    "Potsdam",
+    "Duesseldorf",
+    "Dresden-Hosterwitz",
+    "Muenchen-Flughafen",
+    "Eschwege",
+    "Norderney",
+    "List auf Sylt",
+    "Schmuecke",
+    "Brocken",
+    "Fichtelberg",
+    "Feldberg/Schwarzwald",
+    "Zugspitze",
+    "Saarbruecken-Ensheim",
+    "Leipzig/Halle",
+    "Mainz-Lerchenberg (ZDF)",
+    "Bremen",
+    "Kiel-Holtenau",
+    "Rostock-Warnemuende",
+    "Magdeburg",
+    "Schwerin",
+    "Grosser Arber",
+    "Nuernberg",
+    "Friedrichshafen",
+    "Cottbus",
+    "Kleiner Feldberg/Taunus",
+    "Muenster/Osnabrueck",
+    "Fulda-Horas",
+    "Waren (Mueritz)",
+    "Eisenach",
+    "Kleiner Inselsberg",
+    "Gera-Leumnitz",
+    "Goettingen",
+    "Wuerzburg",
+    "Aachen-Orsbach",
+    "Wittenberg",
+    "Muehlhausen/Thueringen-Goermar",
+    "Freiburg",
+    "Ingolstadt (Flugplatz)",
+    "Regensburg",
+    "Chemnitz",
+    "Trier-Petrisberg",
+    "Tann/Rhoen",
+    "Teterow",
+    "Nossen",
+    "Freiburg/Elbe",
+    "Lenzen/Elbe",
+    "Luebeck-Blankensee",
+    "Fehmarn",
+    "Bremerhaven",
+    "Braunschweig",
+    "Chieming",
+    "Augsburg",
+    "Neuhaus am Rennweg",
+    "Heinersreuth-Vollhof",
+    "Helgoland"
+  )%>%
+  sort()
+```
+
+```{r eval=F}
+
+#Um den Datensatz herunterzuladen beim ersten Ausführen eval=T setzen
+
+dataset <- map(Liste, function(x)
+    bind_rows(
+  readDWD(dataDWD(
+    selectDWD(x, res = "daily", var = "kl", per = "historical"), read = FALSE
+  ), varnames = TRUE) ,
+  readDWD(dataDWD(
+    selectDWD(x, res = "daily", var = "kl", per = "recent"), read = FALSE
+  ), varnames = TRUE) %>%
+    filter(MESS_DATUM>=dmy("01.01.2020")#&MESS_DATUM<=dmy("31.12.2020")
+           )
+  ) %>%
+    mutate(
+      Name_Station = x,
+      Jahr = MESS_DATUM %>% year(),
+      Monat = MESS_DATUM %>% month(label = T, abbr = F)
+    )) %>% bind_rows()
+
+saveRDS(dataset,"data_Klima.RDS")
+```
+
+```{r}
+dataset<-readRDS(file ="data_Klima.RDS" )%>%
+  filter(MESS_DATUM<=ymd("2020-12-31"))%>%
+    mutate(
+      Monat = MESS_DATUM %>% month(.,label = T, abbr = F),
+      Year=Jahr
+    )
+
+month_list <- c("Entire Year", format(ISOdate(2021, 1:12, 1), "%B"))
+
+Liste_Bundeslaender<-c("Bayern"
+                  , "Baden-Wuerttemberg", "Rheinland-Pfalz", "Hessen", "Niedersachsen"
+                  , "Schleswig-Holstein", "Saarland", "Hamburg", "Thueringen"
+                  , "Nordrhein-Westfalen", "Sachsen", "Brandenburg", "Sachsen-Anhalt"
+                  , "Mecklenburg-Vorpommern", "Bremen", "Berlin")
+
+data(metaIndex)
+
+Index_Wetterstationen<-metaIndex
+```
+
+## Column {.sidebar}
+
+```{r}
+selectInput('Station', HTML(paste("<b>","Station name","</b>")), Liste, selected = "Erfurt-Weimar")
+
+selectInput(
+  'ycol',
+  HTML(paste("<b>","Variable","</b>")),
+  c(
+    "Temperature",
+    "Snow_height",
+    "Sunshine_duration",
+    "Precipitation_height"
+  ),
+  selected = names(dataset)[[1]]
+)
+
+selectInput(
+  'month',
+  HTML(paste("<b>","Year / Month","</b>")),
+  c(
+    month_list
+  ),
+  selected = "Entire Year"
+)
+
+radioButtons("regline",
+             HTML(paste("<b>Trend line:</b>", "(Regression line)", sep="<br/>")),
+             c("Yes" = TRUE,
+               "No" = FALSE),
+             selected = FALSE)
+```
+
+<b>Location:</b>
+
+```{r}
+renderLeaflet({
+Index_Wetterstationen%>%filter(Stationsname==input$Station)%>%
+  distinct(Stationsname,.keep_all = T)%>%
+  leaflet()%>%
+  addTiles()%>%
+  addMarkers(
+    ~geoLaenge,
+    ~geoBreite,
+    popup = ~Stationsname,
+    label = ~str_c(
+        "<p>",
+        "<b>",
+        Stationsname,
+        "</b>",
+        " <p> ",
+        "State: ",
+        Bundesland,
+        " <p> ",
+        "Station height: ",
+        Stationshoehe,
+        " m",
+        " <p> ",
+        "Station_id: ",
+        Stations_id,
+        "</p>"
+      )%>%
+      HTML()
+  )
+})
+```
+
+## Column {data-width="1000"}
+
+### Average `r reactive({input$month})`
+
+```{r}
+selectedData <- reactive({
+  dataset %>%
+    {
+      if (input$month != "Entire Year")
+        filter(., Monat == input$month)
+      else
+        (.)
+    }  %>%
+    group_by(Year, Name_Station) %>%
+    summarise(
+      "Temperature" = mean(TMK.Lufttemperatur) %>% round(2),
+      "Snow_height" = mean(SHK_TAG.Schneehoehe) %>% round(2),
+      "Sunshine_duration" = mean(SDK.Sonnenscheindauer) %>% round(2),
+      "Precipitation_height" = mean(RSK.Niederschlagshoehe) %>% round(2)
+    ) %>% filter(Name_Station == input$Station)
+})
+
+
+renderPlotly({
+  p1 <-
+    ggplot(data = selectedData(),
+           aes_string(
+             x = "Year",
+             y = input$ycol,
+             fill = input$ycol)
+             ) +
+    geom_bar(stat = "identity", size = 10) +
+    scale_fill_gradient(
+      low = case_when(
+        input$ycol == "Temperature" ~ "blue",
+        input$ycol == "Snow_height" ~ "green",
+        input$ycol == "Sunshine_duration" ~ "black",
+        input$ycol == "Precipitation_height" ~ "brown"
+      ),
+      high = case_when(
+        input$ycol == "Temperature" ~ "red",
+        input$ycol == "Snow_height" ~ "blue",
+        input$ycol == "Sunshine_duration" ~ "yellow",
+        input$ycol == "Precipitation_height" ~ "blue"
+      )
+    ) +
+    xlab("Year") +
+    theme(legend.position = "none")
+  
+  ggplotly(if (input$regline) {
+    print(p1 + geom_smooth(method = 'lm', se = F))
+  }
+  else{
+    p1
+  },tooltip = c("x","y"))
+})
+```
+
+# How was the weather when and where? 
+
+## Column {.sidebar}
+
+```{r}
+selectInput('Station2', HTML(paste("<b>","Station name","</b>")), Liste, selected = "Erfurt-Weimar")
+
+dateInput("date1",HTML(paste("<b>","Date","</b>")), value = "2020-12-31", max="2020-12-31", startview="decade")
+```
+
+## Column {data-width="300"}
+
+```{r}
+selectedData2<-
+  reactive({
+  dataset%>%filter(MESS_DATUM==input$date1)%>%
+    filter(Name_Station==input$Station2)
+})
+
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Average temperature\n","on ", input$date1%>%format("%d.%m.%Y")))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData2())[1] == 0)){"Not\navailable"}
+           else if ( is.na(selectedData2()$TMK.Lufttemperatur)) {"Not\navailable"}
+           else (paste0(selectedData2()$TMK.Lufttemperatur%>%round(1),"°C")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Minimum temperature\n","on ", input$date1%>%format("%d.%m.%Y")))+ 
+  annotate("text", x = 0.5, y = 0.4,
+           label = 
+           if((nrow(selectedData2())[1] == 0)){"Not\navailable"}
+           else if ( is.na(selectedData2()$TNK.Lufttemperatur_Min)) {"Not\navailable"}
+           else (paste0(selectedData2()$TNK.Lufttemperatur_Min%>%round(1),"°C")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Maximum temperature\n","on ", input$date1%>%format("%d.%m.%Y")))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData2())[1] == 0)){"Not\navailable"}
+           else if ( is.na(selectedData2()$TXK.Lufttemperatur_Max)) {"Not\navailable"}
+           else (paste0(selectedData2()$TXK.Lufttemperatur_Max%>%round(1),"°C")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+## Column {data-width="300"}
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Sunshine duration\n","on ", input$date1%>%format("%d.%m.%Y")))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData2())[1] == 0)){"Not\navailable"}
+           else if ( is.na(selectedData2()$SDK.Sonnenscheindauer)) {"Not\navailable"}
+           else (paste0(selectedData2()$SDK.Sonnenscheindauer%>%round(1)," hours")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Precipitation height\n","on ", input$date1%>%format("%d.%m.%Y")))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData2())[1] == 0)){"Not\navailable"}
+           else if ( is.na(selectedData2()$RSK.Niederschlagshoehe)) {"Not\navailable"}
+           else (paste0(selectedData2()$RSK.Niederschlagshoehe%>%round(1)," cm")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Snow height\n","on ", input$date1%>%format("%d.%m.%Y")))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData2())[1] == 0)){"Not\navailable"}
+           else if ( is.na(selectedData2()$SHK_TAG.Schneehoehe)) {"Not\navailable"}
+           else (paste0(selectedData2()$SHK_TAG.Schneehoehe%>%round(1)," cm")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+## Column {data-width="300"}
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Wind speed (daily average)\n","on ", input$date1%>%format("%d.%m.%Y")))+ 
+  annotate("text",
+           x = 0.5, 
+           y = 0.4,
+           label =
+           if((nrow(selectedData2())[1] == 0)){"Not\navailable"}
+           else if ( is.na(selectedData2()$FM.Windgeschwindigkeit)) {"Not\navailable"}
+           else (paste0(selectedData2()$FM.Windgeschwindigkeit%>%round(1)," m/sec")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Wind peak\n","on ", input$date1%>%format("%d.%m.%Y")))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData2())[1] == 0)){"Not\navailable"}
+           else if ( is.na(selectedData2()$FX.Windspitze)) {"Not\navailable"}
+           else (paste0(selectedData2()$FX.Windspitze%>%round(1)," m/sec")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Air pressure (daily average)\n","on ", input$date1%>%format("%d.%m.%Y")))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label =
+           if((nrow(selectedData2())[1] == 0)){"Not\navailable"}
+           else if ( is.na(selectedData2()$PM.Luftdruck)) {"Not\navailable"}
+           else (paste0(selectedData2()$PM.Luftdruck," hpa")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text(size=25))
+})
+```
+
+# Year-to-year comparison
+
+## Column {.sidebar}
+
+```{r}
+selectInput('Station4', HTML(paste("<b>","Station name","</b>")), Liste, selected = "Erfurt-Weimar")
+
+selectInput(
+  'ycol3',
+  HTML(paste("<b>","Variable","</b>")),
+  c(
+    "Temperature",
+    "Snow_height",
+    "Sunshine_duration",
+    "Precipitation_height"
+  ),
+  selected = names(dataset)[[1]]
+)
+
+selectInput(
+  'month2',
+  HTML(paste("<b>","Year / Month","</b>")),
+  c(
+    month_list
+  ),
+  selected = "Entire Year"
+)
+
+selectInput(
+  'type',
+  HTML(paste("<b>","Plot type","</b>")),
+  c(
+    c("Line plot","Scatter plot","Bar plot")
+  ),
+  selected = "Line plot"
+)
+
+radioButtons("smooth_trend",
+             HTML(paste("<b>Trend line over all selected years:</b>", "(smooth)", sep="<br/>")),
+             c("Yes" = TRUE,
+               "No" = FALSE),
+             selected = FALSE)
+
+textInput("text", HTML(paste("<b>","Years","</b>")), value = "2020,2019")
+```
+
+Multiple years can be compared in this field. Simply enter as many years as desired. The years must be separated by a comma and must not contain a space.
+
+Example:
+
+2020,2019,1999,1980
+
+## Column {data-width="1000"}
+
+### Annual trends
+
+```{r}
+selectedData3 <- reactive({
+  dataset %>%
+    rename("Temperature"=TMK.Lufttemperatur,
+           "Snow_height"=SHK_TAG.Schneehoehe,
+           "Sunshine_duration"=SDK.Sonnenscheindauer,
+           "Precipitation_height"=RSK.Niederschlagshoehe)%>%
+    {
+      if (input$month2 != "Entire Year")
+        filter(., Monat == input$month2)
+      else
+        (.)
+    }%>%
+    filter(.,Year %in% strsplit(input$text, ",")[[1]])%>%
+    filter(Name_Station==input$Station4)%>%
+  mutate(year = factor(year(MESS_DATUM)),
+         Date = update(MESS_DATUM, year = 1)%>%as.Date())
+})
+
+renderPlotly({
+
+p2<-ggplot(data = selectedData3(),
+           aes_string(
+             x = "Date",
+             y = input$ycol3 )) +
+      {if(input$type=="Line plot")
+      {geom_line(aes_string(color=selectedData3()$year))}
+    else if(input$type=="Scatter plot")
+    {geom_point(aes_string(color=selectedData3()$year))}
+    else if(input$type=="Bar plot")
+    {geom_col(aes_string(fill=selectedData3()$year), alpha=0.3, position = 'identity')}
+    }+
+  scale_x_date(date_breaks = "1 week", date_labels = "%d-%b")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))+
+    labs(x="",color = "Years")
+
+  ggplotly(if (input$smooth_trend) {
+    print(p2 + geom_smooth())
+  }
+  else{
+    p2
+  },tooltip = c("x","y"))
+})
+```
+
+# Climate records
+
+## Column {.sidebar}
+
+```{r}
+selectInput('Station3', HTML(paste("<b>","Station name","</b>")), c("All stations",Liste), selected = "All stations")
+
+radioButtons("record",
+             HTML(paste("<b>","Maximum / Minumum","</b>")),
+             c("Maximum" = "Maximum",
+               "Minimum" = "Minimum"),
+             selected = "Maximum")
+```
+
+## Column {data-width="300"}
+
+```{r}
+selectedData4<-
+  reactive({
+  dataset%>%
+      {if (input$Station3 != "All stations")
+    filter(.,Name_Station==input$Station3)
+        else(.)
+      }
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Average temperature"))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData4())[1] == 0)){"Not\navailable"}
+           else if(input$record=="Maximum")
+             paste0(
+             selectedData4()$TMK.Lufttemperatur%>%
+               max(na.rm = T)%>%round(1),"°C","\n",selectedData4()[which.max(selectedData4()$TMK.Lufttemperatur),]$Name_Station,"\n","on ",selectedData4()[which.max(selectedData4()$TMK.Lufttemperatur),]$MESS_DATUM%>%format("%d.%m.%Y"))
+           else if(input$record=="Minimum")
+             paste0(
+             selectedData4()$TMK.Lufttemperatur%>%
+               min(na.rm = T)%>%round(1),"°C","\n",selectedData4()[which.min(selectedData4()$TMK.Lufttemperatur),]$Name_Station,"\n","on ",selectedData4()[which.min(selectedData4()$TMK.Lufttemperatur),]$MESS_DATUM%>%format("%d.%m.%Y"))
+             ,
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Minimum temperature"))+ 
+  annotate("text", x = 0.5, y = 0.4,
+           label = 
+           if((nrow(selectedData4())[1] == 0)){"Not\navailable"}
+        else if(input$record=="Maximum")
+             paste0(
+             selectedData4()$TNK.Lufttemperatur_Min%>%
+               max(na.rm = T)%>%round(1),"°C","\n",selectedData4()[which.max(selectedData4()$TNK.Lufttemperatur_Min),]$Name_Station,"\n","on ",selectedData4()[which.max(selectedData4()$TNK.Lufttemperatur_Min),]$MESS_DATUM%>%format("%d.%m.%Y"))
+           else if(input$record=="Minimum")
+             paste0(
+             selectedData4()$TNK.Lufttemperatur_Min%>%
+               min(na.rm = T)%>%round(1),"°C","\n",selectedData4()[which.min(selectedData4()$TNK.Lufttemperatur_Min),]$Name_Station,"\n","on ",selectedData4()[which.min(selectedData4()$TNK.Lufttemperatur_Min),]$MESS_DATUM%>%format("%d.%m.%Y")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Maximum temperature"))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData4())[1] == 0)){"Not\navailable"}
+           else if(input$record=="Maximum")
+             paste0(
+             selectedData4()$TXK.Lufttemperatur_Max%>%
+               max(na.rm = T)%>%round(1),"°C","\n",selectedData4()[which.max(selectedData4()$TXK.Lufttemperatur_Max),]$Name_Station,"\n","on ",selectedData4()[which.max(selectedData4()$TXK.Lufttemperatur_Max),]$MESS_DATUM%>%format("%d.%m.%Y"))
+           else if(input$record=="Minimum")
+             paste0(
+             selectedData4()$TXK.Lufttemperatur_Max%>%
+               min(na.rm = T)%>%round(1),"°C","\n",selectedData4()[which.min(selectedData4()$TXK.Lufttemperatur_Max),]$Name_Station,"\n","on ",selectedData4()[which.min(selectedData4()$TXK.Lufttemperatur_Max),]$MESS_DATUM%>%format("%d.%m.%Y")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+## Column {data-width="300"}
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Sunshine duration"))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData4())[1] == 0)){"Not\navailable"}
+           else if(input$record=="Maximum")
+             paste0(
+             selectedData4()$SDK.Sonnenscheindauer%>%
+               max(na.rm = T)%>%round(1)," hours","\n",selectedData4()[which.max(selectedData4()$SDK.Sonnenscheindauer),]$Name_Station,"\n","on ",selectedData4()[which.max(selectedData4()$SDK.Sonnenscheindauer),]$MESS_DATUM%>%format("%d.%m.%Y"))
+           else if(input$record=="Minimum")
+             paste0(
+             selectedData4()$SDK.Sonnenscheindauer%>%
+               min(na.rm = T)%>%round(1)," hours","\n",selectedData4()[which.min(selectedData4()$SDK.Sonnenscheindauer),]$Name_Station,"\n","on ",selectedData4()[which.min(selectedData4()$SDK.Sonnenscheindauer),]$MESS_DATUM%>%format("%d.%m.%Y")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Precipitation height"))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData4())[1] == 0)){"Not\navailable"}
+           else if(input$record=="Maximum")
+             paste0(
+             selectedData4()$RSK.Niederschlagshoehe%>%
+               max(na.rm = T)%>%round(1)," cm","\n",selectedData4()[which.max(selectedData4()$RSK.Niederschlagshoehe),]$Name_Station,"\n","on ",selectedData4()[which.max(selectedData4()$RSK.Niederschlagshoehe),]$MESS_DATUM%>%format("%d.%m.%Y"))
+           else if(input$record=="Minimum")
+             paste0(
+             selectedData4()$RSK.Niederschlagshoehe%>%
+               min(na.rm = T)%>%round(1)," cm","\n",selectedData4()[which.min(selectedData4()$RSK.Niederschlagshoehe),]$Name_Station,"\n","on ",selectedData4()[which.min(selectedData4()$RSK.Niederschlagshoehe),]$MESS_DATUM%>%format("%d.%m.%Y")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Snow height"))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData4())[1] == 0)){"Not\navailable"}
+           else if(input$record=="Maximum")
+             paste0(
+             selectedData4()$SHK_TAG.Schneehoehe%>%
+               max(na.rm = T)%>%round(1)," cm","\n",selectedData4()[which.max(selectedData4()$SHK_TAG.Schneehoehe),]$Name_Station,"\n","on ",selectedData4()[which.max(selectedData4()$SHK_TAG.Schneehoehe),]$MESS_DATUM%>%format("%d.%m.%Y"))
+           else if(input$record=="Minimum")
+             paste0(
+             selectedData4()$SHK_TAG.Schneehoehe%>%
+               min(na.rm = T)%>%round(1)," cm","\n",selectedData4()[which.min(selectedData4()$SHK_TAG.Schneehoehe),]$Name_Station,"\n","on ",selectedData4()[which.min(selectedData4()$SHK_TAG.Schneehoehe),]$MESS_DATUM%>%format("%d.%m.%Y")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+## Column {data-width="300"}
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Wind speed"))+ 
+  annotate("text",
+           x = 0.5, 
+           y = 0.4,
+           label =
+           if((nrow(selectedData4())[1] == 0)){"Not\navailable"}
+           else if(input$record=="Maximum")
+             paste0(
+             selectedData4()$FM.Windgeschwindigkeit%>%
+               max(na.rm = T)%>%round(1)," m/sec","\n",selectedData4()[which.max(selectedData4()$FM.Windgeschwindigkeit),]$Name_Station,"\n","on ",selectedData4()[which.max(selectedData4()$FM.Windgeschwindigkeit),]$MESS_DATUM%>%format("%d.%m.%Y"))
+           else if(input$record=="Minimum")
+             paste0(
+             selectedData4()$FM.Windgeschwindigkeit%>%
+               min(na.rm = T)%>%round(1)," m/sec","\n",selectedData4()[which.min(selectedData4()$FM.Windgeschwindigkeit),]$Name_Station,"\n","on ",selectedData4()[which.min(selectedData4()$FM.Windgeschwindigkeit),]$MESS_DATUM%>%format("%d.%m.%Y")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Wind peak"))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label = 
+           if((nrow(selectedData4())[1] == 0)){"Not\navailable"}
+           else if(input$record=="Maximum")
+             paste0(
+             selectedData4()$FX.Windspitze%>%
+               max(na.rm = T)%>%round(1)," m/sec","\n",selectedData4()[which.max(selectedData4()$FX.Windspitze),]$Name_Station,"\n","on ",selectedData4()[which.max(selectedData4()$FX.Windspitze),]$MESS_DATUM%>%format("%d.%m.%Y"))
+           else if(input$record=="Minimum")
+             paste0(
+             selectedData4()$FX.Windspitze%>%
+               min(na.rm = T)%>%round(1)," m/sec","\n",selectedData4()[which.min(selectedData4()$FX.Windspitze),]$Name_Station,"\n","on ",selectedData4()[which.min(selectedData4()$FX.Windspitze),]$MESS_DATUM%>%format("%d.%m.%Y")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text( size=25))
+})
+```
+
+```{r}
+renderPlot({
+ggplot(data.frame(x=runif(10),y=runif(10)), aes(x=x, y=y))+
+  labs(title=paste0("Air pressure (daily average)"))+ 
+  annotate("text",
+           x = 0.5,
+           y = 0.4,
+           label =
+           if((nrow(selectedData4())[1] == 0)){"Not\navailable"}
+           else if(input$record=="Maximum")
+             paste0(
+             selectedData4()$PM.Luftdruck%>%
+               max(na.rm = T)%>%round(1)," hpa","\n",selectedData4()[which.max(selectedData4()$PM.Luftdruck),]$Name_Station,"\n","on ",selectedData4()[which.max(selectedData4()$PM.Luftdruck),]$MESS_DATUM%>%format("%d.%m.%Y"))
+           else if(input$record=="Minimum")
+             paste0(
+             selectedData4()$PM.Luftdruck%>%
+               min(na.rm = T)%>%round(1)," hpa","\n",selectedData4()[which.min(selectedData4()$PM.Luftdruck),]$Name_Station,"\n","on ",selectedData4()[which.min(selectedData4()$PM.Luftdruck),]$MESS_DATUM%>%format("%d.%m.%Y")),
+           size=20)+ 
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),legend.position="none")+ 
+  theme(plot.title = element_text(size=25))
+})
+```
+
+# Weather stations overview
+
+```{r}
+Index_Wetterstationen%>%
+  tibble()%>%
+  filter(res=="daily")%>%
+  distinct(Stationsname, .keep_all = TRUE)%>%
+  filter(Stationsname %in% Liste)%>%
+  leaflet() %>%
+  addTiles() %>%
+  addMarkers(
+    ~ geoLaenge,
+    ~ geoBreite,
+    popup = ~ as.character(Stationsname),
+    label = ~ lapply(
+      str_c(
+        "<p>",
+        "<b>",
+        Stationsname,
+        "</b>",
+        " <p> ",
+        "State: ",
+        Bundesland,
+        " <p> ",
+        "Statio height: ",
+        Stationshoehe,
+        " m",
+        " <p> ",
+        "Station ID: ",
+        Stations_id,
+        "</p>"
+      ),
+      htmltools::HTML
+    )
+  )
+```
+
+# About
+
+## Column {.sidebar}
+
+This web app is developed and maintained by  Tobias Kellner (<https://github.com/TobiasKellner>).\
+This dashboard is used to prepare and interactively visualize historical climate data from the German Weather Service.\
+For `r length(Liste)` weather stations the historical data can be visualized.\
+In principle, it is possible to include additional weather stations.\
+However, the data must be checked manually beforehand.\
+Just send me an email, if you want to add more weather stations:
+[tobias.kellner\@uni-erfurt.de](tobias.kellner@uni-erfurt.de)\
+Praise, criticism and suggestions for improvement are also welcome.
+
+The data was downloaded using the R package [rdwd](https://cran.r-project.org/web/packages/rdwd/index.html).\
+The source code of this web app is public and can be viewed after clicking on the upper right icon. Gaps in the graphs are due to missing values in the time series of the German Weather Service.
